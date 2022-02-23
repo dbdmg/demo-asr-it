@@ -25,50 +25,7 @@ DICT_MODELS = {
 MODELS = sorted(DICT_MODELS.keys())
 CACHED_MODELS_BY_ID = {}
 
-def run(input_file, model_name, decoding_type, history):
-
-    logger.info(f"Running ASR {model_name}-{decoding_type} for {input_file}")
-
-    history = history or []
-
-    model = DICT_MODELS.get(model_name)
-
-    if model is None:
-        history.append({
-            "error_message": f"Model size {model_size} not found for {language} language :("
-        })
-    elif decoding_type == "Guided by Language Model" and not model["has_lm"]:
-        history.append({
-            "error_message": f"LM not available for {language} language :("
-        })
-    else:
-
-        # model_instance = AutoModelForCTC.from_pretrained(model["model_id"])
-        model_instance = CACHED_MODELS_BY_ID.get(model["model_id"], None)
-        if model_instance is None:
-            model_instance = AutoModelForCTC.from_pretrained(model["model_id"])
-            CACHED_MODELS_BY_ID[model["model_id"]] = model_instance
-
-        if decoding_type == "Guided by Language Model":
-            processor = Wav2Vec2ProcessorWithLM.from_pretrained(model["model_id"])
-            asr = pipeline("automatic-speech-recognition", model=model_instance, tokenizer=processor.tokenizer, 
-                           feature_extractor=processor.feature_extractor, decoder=processor.decoder)
-        else:
-            processor = Wav2Vec2Processor.from_pretrained(model["model_id"])
-            asr = pipeline("automatic-speech-recognition", model=model_instance, tokenizer=processor.tokenizer, 
-                           feature_extractor=processor.feature_extractor, decoder=None)
-
-        transcription = asr(input_file, chunk_length_s=5, stride_length_s=1)["text"]
-
-        logger.info(f"Transcription for {input_file}: {transcription}")
-
-        history.append({
-            "model_id": model["model_id"],
-            "decoding_type": decoding_type,
-            "transcription": transcription,
-            "error_message": None
-        })
-
+def build_html(history):
     html_output = "<div class='result'>"
     for item in history:
         if item["error_message"] is not None:
@@ -80,6 +37,66 @@ def run(input_file, model_name, decoding_type, history):
             html_output += f'{item["transcription"]}<br/>'
             html_output += "</div>"
     html_output += "</div>"
+    return html_output
+
+def run(uploaded_file, input_file, model_name, decoding_type, history):
+    
+    model = DICT_MODELS.get(model_name)
+    history = history or []
+    
+    if uploaded_file is None and input_file is None:
+        history.append({
+            "model_id": model["model_id"],
+            "decoding_type": decoding_type,
+            "transcription": "",
+            "error_message": "No input provided."
+        })
+    else:
+
+        if input_file is None:
+            input_file = uploaded_file
+
+        logger.info(f"Running ASR {model_name}-{decoding_type} for {input_file}")
+
+        history = history or []
+
+        if model is None:
+            history.append({
+                "error_message": f"Model size {model_size} not found for {language} language :("
+            })
+        elif decoding_type == "Guided by Language Model" and not model["has_lm"]:
+            history.append({
+                "error_message": f"LM not available for {language} language :("
+            })
+        else:
+
+            # model_instance = AutoModelForCTC.from_pretrained(model["model_id"])
+            model_instance = CACHED_MODELS_BY_ID.get(model["model_id"], None)
+            if model_instance is None:
+                model_instance = AutoModelForCTC.from_pretrained(model["model_id"])
+                CACHED_MODELS_BY_ID[model["model_id"]] = model_instance
+
+            if decoding_type == "Guided by Language Model":
+                processor = Wav2Vec2ProcessorWithLM.from_pretrained(model["model_id"])
+                asr = pipeline("automatic-speech-recognition", model=model_instance, tokenizer=processor.tokenizer, 
+                            feature_extractor=processor.feature_extractor, decoder=processor.decoder)
+            else:
+                processor = Wav2Vec2Processor.from_pretrained(model["model_id"])
+                asr = pipeline("automatic-speech-recognition", model=model_instance, tokenizer=processor.tokenizer, 
+                            feature_extractor=processor.feature_extractor, decoder=None)
+
+            transcription = asr(input_file, chunk_length_s=5, stride_length_s=1)["text"]
+
+            logger.info(f"Transcription for {input_file}: {transcription}")
+
+            history.append({
+                "model_id": model["model_id"],
+                "decoding_type": decoding_type,
+                "transcription": transcription,
+                "error_message": None
+            })
+
+    html_output = build_html(history)
 
     return html_output, history
 
@@ -87,7 +104,8 @@ def run(input_file, model_name, decoding_type, history):
 gr.Interface(
     run,
     inputs=[
-        gr.inputs.Audio(source="microphone", type="filepath", label="Record something..."),
+        gr.inputs.Audio(source="upload", type='filepath', optional=True),
+        gr.inputs.Audio(source="microphone", type="filepath", label="Record something...", optional=True),
         gr.inputs.Radio(label="Model", choices=MODELS),
         gr.inputs.Radio(label="Decoding type", choices=["Standard", "Guided by Language Model"]),
         "state"
@@ -106,5 +124,8 @@ gr.Interface(
     """,
     allow_screenshot=False,
     allow_flagging="never",
-    theme="huggingface"
+    theme="huggingface",
+    examples = [
+        ['demo_example_1.mp3', 'demo_example_1.mp3', 'robust-300m', 'Guided by Language Model']
+    ]
 ).launch(enable_queue=True)
